@@ -1,9 +1,10 @@
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 
 namespace Kardashev.PlanetGeneration.Jobs
 {
-	// [BurstCompile]
+	[BurstCompile]
 	struct AssignPlateSeedTilesJob : IJobParallelFor
 	{
 		[ReadOnly] 

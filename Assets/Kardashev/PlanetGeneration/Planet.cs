@@ -137,18 +137,6 @@ namespace Kardashev.PlanetGeneration
         {
             return edgeIndex / 3;
         }
-
-        /// <summary>
-        /// Returns the indices of the three edges forming a corner (triangle).
-        /// </summary>
-        public static NativeArray<int> GetCornerEdgeIndices(int cornerIndex)
-        {
-            var edges = new NativeArray<int>(3, Allocator.Temp);
-            edges[0] = 3 * cornerIndex;
-            edges[1] = 3 * cornerIndex + 1;
-            edges[2] = 3 * cornerIndex + 2;
-            return edges;
-        }
     
         /// <summary>
         /// Returns the indices of the tile centers (seeds) that form the given corner.
@@ -161,34 +149,7 @@ namespace Kardashev.PlanetGeneration
             tileIndices[2] = Spokes[3 * cornerIndex + 2];
             return tileIndices;
         }
-    
-        /// <summary>
-        /// Returns the indices of the corners adjacent to the given corner.
-        /// </summary>
-        public NativeArray<int> GetCornerNeighborIndices(int cornerIndex)
-        {
-            var neighbors = new NativeArray<int>(3, Allocator.Temp);
-            neighbors[0] = GetCornerIndex(TileSpokeOpposites[3 * cornerIndex]);
-            neighbors[1] = GetCornerIndex(TileSpokeOpposites[3 * cornerIndex + 1]);
-            neighbors[2] = GetCornerIndex(TileSpokeOpposites[3 * cornerIndex + 2]);
-            return neighbors;
-        }
 
-    
-        /// <summary>
-        /// Returns all incoming tile edges for the specified tile center.
-        /// </summary>
-        public NativeArray<int> GetIncomingTileSpokeIndices(int tileIndex)
-        {
-            var edgeLoop      = GetTileSpokeIndices(tileIndex);
-            var incomingEdges = new NativeArray<int>(edgeLoop.Length, Allocator.Temp);
-            for (var i = 0; i < edgeLoop.Length; i++)
-            {
-                incomingEdges[i] = GetPreviousEdgeIndex(edgeLoop[i]);
-            }
-            edgeLoop.Dispose();
-            return incomingEdges;
-        }
     
         /// <summary>
         /// Returns the neighboring tile centers (seeds) adjacent to the given tile center.
@@ -220,17 +181,7 @@ namespace Kardashev.PlanetGeneration
             edgeLoop.Dispose();
             return corners;
         }
-    
-        /// <summary>
-        /// Returns the two tile centers (seeds) connected by the specified tile edge.
-        /// </summary>
-        public (int fromTile, int toTile) GetSpokeTiles(int edgeIndex)
-        {
-            var fromTile = Spokes[edgeIndex];
-            var toTile   = Spokes[GetNextEdgeIndex(edgeIndex)];
-            return (fromTile, toTile);
-        }
-    
+
         /// <summary>
         /// Returns the two corners adjacent to the specified tile edge.
         /// </summary>
@@ -239,67 +190,6 @@ namespace Kardashev.PlanetGeneration
             var corner1 = GetCornerIndex(edgeIndex);
             var corner2 = GetCornerIndex(TileSpokeOpposites[edgeIndex]);
             return (corner1, corner2);
-        }
-    
-        /// <summary>
-        /// Adds a new tile center (seed) to the planet map.
-        /// </summary>
-        public int AddTileCenter(float3 position)
-        {
-            // TilePositions.Add(position);
-            // TileSpokes.Add(-1);
-            // TileElevations.Add(0);
-            return TilePositions.Length - 1;
-        }
-    
-        /// <summary>
-        /// Adds a new corner (computed from three tile centers) to the planet map.
-        /// </summary>
-        public int AddTileCorner(int tileAIndex, int tileBIndex, int tileCIndex, NativeHashMap<(int, int), int> edgeLookupTable)
-        {
-            var cornerIndex   = TileCorners.Length;
-            var baseEdgeIndex = Spokes.Length;
-        
-            // Add new tile spokes.
-            // Spokes.Add(tileAIndex);
-            // Spokes.Add(tileBIndex);
-            // Spokes.Add(tileCIndex);
-        
-            // Initialize new spoke opposites.
-            // TileSpokeOpposites.Add(-1);
-            // TileSpokeOpposites.Add(-1);
-            // TileSpokeOpposites.Add(-1);
-        
-            // Calculate and store corner position.
-            var cornerPosition = (TilePositions[tileAIndex] + TilePositions[tileBIndex] + TilePositions[tileCIndex]) / 3;
-            // TileCorners.Add(cornerPosition);
-
-            // Add spokes to tile if tile doesn't already have one.
-            if (TileSpokes[tileAIndex] == -1) TileSpokes[tileAIndex] = baseEdgeIndex;
-            if (TileSpokes[tileBIndex] == -1) TileSpokes[tileBIndex] = baseEdgeIndex + 1;
-            if (TileSpokes[tileCIndex] == -1) TileSpokes[tileCIndex] = baseEdgeIndex + 2;
-
-            // Link opposite spokes.
-            LinkOppositeSpoke(baseEdgeIndex, tileAIndex, tileBIndex, edgeLookupTable);
-            LinkOppositeSpoke(baseEdgeIndex + 1, tileBIndex, tileCIndex, edgeLookupTable);
-            LinkOppositeSpoke(baseEdgeIndex + 2, tileCIndex, tileAIndex, edgeLookupTable);
-        
-            return cornerIndex;
-        }
-
-        /// <summary>
-        /// Searches for and links the opposite tile edge for a newly added edge.
-        /// </summary>
-        private void LinkOppositeSpoke(int newEdgeIndex, int fromTile, int toTile, NativeHashMap<(int, int), int> edgeLookupTable)
-        {
-            // Look up the reverse edge key.
-            if (edgeLookupTable.TryGetValue((toTile, fromTile), out var oppositeSpokeIndex))
-            {
-                TileSpokeOpposites[oppositeSpokeIndex] = newEdgeIndex;
-                TileSpokeOpposites[newEdgeIndex]       = oppositeSpokeIndex;
-            }
-            // Register this edge so future edges can find it.
-            edgeLookupTable[(fromTile, toTile)] = newEdgeIndex;
         }
     }
 }

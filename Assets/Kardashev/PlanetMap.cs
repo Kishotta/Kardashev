@@ -17,7 +17,6 @@ namespace Kardashev
 		public uint seed = 1337;
 		
 		public PlanetSize size = PlanetSize.Medium;
-		private float _radius = 1f;
 
 		[Header("Edge Flip Settings")]
 		[Range(0f, 0.1f)]
@@ -51,8 +50,20 @@ namespace Kardashev
 		{
 			Random.InitState((int)seed);
 			
-			_radius = PlanetHelpers.Radius((int)size);;
-			var planetMap = CreateIcosahedronPlanetMap();
+			var planetMap = new Planet(seed, size, Allocator.Persistent);
+			
+			var vertices = new NativeArray<float3>(Icosahedron.Vertices, Allocator.TempJob);
+			var faces = new NativeArray<int3>(Icosahedron.Faces, Allocator.TempJob);
+			var edgeLookupTable = new NativeParallelHashMap<(int, int), int>(PlanetHelpers.SpokeCount((int)size), Allocator.TempJob);
+			
+			var assignBaseIcosahedronVerticesJobHandle = AssignBaseIcosahedronVertices(vertices, planetMap);
+			var assignBaseIcosahedronFacesJobHandle = AssignBaseIcosahedronFaces(faces, planetMap, edgeLookupTable, assignBaseIcosahedronVerticesJobHandle);
+			var connectOppositeSpokesJobHandle = ConnectOppositeSpokes(planetMap, edgeLookupTable, assignBaseIcosahedronFacesJobHandle);
+			connectOppositeSpokesJobHandle.Complete();
+
+			vertices.Dispose();
+			faces.Dispose();
+			edgeLookupTable.Dispose();
 			
 			for(var i = 0; i < (int)size; i++)
 			{
@@ -71,48 +82,52 @@ namespace Kardashev
 			
 			onMapCreated?.Invoke(planetMap);
 		}
-
-		private Planet CreateIcosahedronPlanetMap()
+		
+		private JobHandle AssignBaseIcosahedronVertices(
+			NativeArray<float3> vertices,
+			Planet planetMap)
 		{
-			var planetMap = new Planet(seed, size, Allocator.Persistent);
-			
-			var vertices = new NativeArray<float3>(Icosahedron.Vertices, Allocator.TempJob);
 			var assignBaseIcosahedronVerticesJob = new AssignBaseIcosahedronVerticesJob
 			{
-				Radius = PlanetHelpers.Radius((int)size),
-				Vertices = vertices,
+				Radius        = PlanetHelpers.Radius((int)size),
+				Vertices      = vertices,
 				TilePositions = planetMap.TilePositions
 			};
-			var assignBaseIcosahedronVerticesJobHandle = assignBaseIcosahedronVerticesJob.Schedule(vertices.Length, 64);
-			
-			var faces = new NativeArray<int3>(Icosahedron.Faces, Allocator.TempJob);
-			var edgeLookupTable = new NativeParallelHashMap<(int, int), int>(PlanetHelpers.SpokeCount((int)size), Allocator.TempJob);
+			return assignBaseIcosahedronVerticesJob.Schedule(vertices.Length, 64);
+		}
+
+		private static JobHandle AssignBaseIcosahedronFaces(
+			NativeArray<int3> faces,
+			Planet planetMap,
+			NativeParallelHashMap<(int, int), int> edgeLookupTable,
+			JobHandle dependencies)
+		{
 			var assignBaseIcosahedronFacesJob = new AssignBaseIcosahedronFacesJob
 			{
-				Faces = faces,
-				Spokes = planetMap.Spokes,
-				TileSpokes = planetMap.TileSpokes,
-				TilePositions = planetMap.TilePositions,
-				TileCorners = planetMap.TileCorners,
+				Faces           = faces,
+				Spokes          = planetMap.Spokes,
+				TileSpokes      = planetMap.TileSpokes,
+				TilePositions   = planetMap.TilePositions,
+				TileCorners     = planetMap.TileCorners,
 				EdgeLookupTable = edgeLookupTable.AsParallelWriter(),
 			};
-			var assignBaseIcosahedronFacesJobHandle = assignBaseIcosahedronFacesJob.Schedule(faces.Length, 64, assignBaseIcosahedronVerticesJobHandle);
-			
-			var connectOppositeSpokesJob = new ConnectOppositeSpokesJob
-			{
-				Spokes = planetMap.Spokes,
-				TileSpokeOpposites = planetMap.TileSpokeOpposites,
-				EdgeLookupTable = edgeLookupTable
-			};
-			var connectOppositeSpokesJobHandle = connectOppositeSpokesJob.Schedule(planetMap.Spokes.Length, 64, assignBaseIcosahedronFacesJobHandle);
-			connectOppositeSpokesJobHandle.Complete();
-
-			edgeLookupTable.Dispose();
-			vertices.Dispose();
-			faces.Dispose();
-			return planetMap;
+			return assignBaseIcosahedronFacesJob.Schedule(faces.Length, 64, dependencies);
 		}
 		
+		private static JobHandle ConnectOppositeSpokes(
+			Planet planetMap, 
+			NativeParallelHashMap<(int, int), int> edgeLookupTable, 
+			JobHandle dependencies)
+		{
+			var connectOppositeSpokesJob = new ConnectOppositeSpokesJob
+			{
+				Spokes             = planetMap.Spokes,
+				TileSpokeOpposites = planetMap.TileSpokeOpposites,
+				EdgeLookupTable    = edgeLookupTable
+			};
+			return connectOppositeSpokesJob.Schedule(planetMap.Spokes.Length, 64, dependencies);
+		}
+
 		#region Subdivision
 
 		private static void Subdivide(Planet planet)
@@ -437,7 +452,7 @@ namespace Kardashev
 		        neighbors.Dispose();
 
 		        // Reproject onto the sphere.
-		        newTilePositions[tileIndex] = math.normalize(centroid) * _radius;
+		        newTilePositions[tileIndex] = math.normalize(centroid) * PlanetHelpers.Radius((int)size);
 	        }
 	        // Update the map with the new positions.
 	        for (var i = 0; i < planet.TilePositions.Length; i++)

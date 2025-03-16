@@ -15,19 +15,19 @@ namespace Kardashev.PlanetGeneration.Jobs
 		[WriteOnly] public NativeParallelHashMap<(int, int), int>.ParallelWriter EdgeLookupTable;
 		
 		[NativeDisableParallelForRestriction]
-		[WriteOnly] 
-		public NativeArray<int> Spokes;
+		[WriteOnly] public NativeArray<int> Spokes;
 		
-		[NativeDisableParallelForRestriction] public NativeArray<int> TileSpokes;
+		[NativeDisableParallelForRestriction] 
+		public NativeArray<int> TileSpokes;
 		
 		public void Execute(int cornerIndex)
 		{
-			var face          = Faces[cornerIndex];
 			var baseEdgeIndex = cornerIndex * 3;
 
-			var tileAIndex = face.x;
-			var tileBIndex = face.y;
-			var tileCIndex = face.z;
+			var vertices   = Faces[cornerIndex];
+			var tileAIndex = vertices[0];
+			var tileBIndex = vertices[1];
+			var tileCIndex = vertices[2];
         
 			// Add new tile spokes.
 			Spokes[baseEdgeIndex]     = tileAIndex;
@@ -43,18 +43,9 @@ namespace Kardashev.PlanetGeneration.Jobs
 			if (TileSpokes[tileBIndex] == -1) TileSpokes[tileBIndex] = baseEdgeIndex + 1;
 			if (TileSpokes[tileCIndex] == -1) TileSpokes[tileCIndex] = baseEdgeIndex + 2;
 			
-			CacheOppositeSpoke(baseEdgeIndex, tileAIndex, tileBIndex, EdgeLookupTable);
-			CacheOppositeSpoke(baseEdgeIndex + 1, tileBIndex, tileCIndex, EdgeLookupTable);
-			CacheOppositeSpoke(baseEdgeIndex + 2, tileCIndex, tileAIndex, EdgeLookupTable);
-		}
-		
-		private static void CacheOppositeSpoke(
-			int newEdgeIndex,
-			int fromTile,
-			int toTile,
-			NativeParallelHashMap<(int, int), int>.ParallelWriter edgeLookupTable)
-		{
-			edgeLookupTable.TryAdd((fromTile, toTile), newEdgeIndex);
+			EdgeLookupTable.TryAdd((tileAIndex, tileBIndex), baseEdgeIndex);
+			EdgeLookupTable.TryAdd((tileBIndex, tileCIndex), baseEdgeIndex + 1);
+			EdgeLookupTable.TryAdd((tileCIndex, tileAIndex), baseEdgeIndex + 2);
 		}
 	}
 }
