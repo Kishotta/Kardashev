@@ -114,8 +114,8 @@ MonoBehaviour:
     ctime1: 32112
     ctime2: 32768
     ctime3: 49151
-    ctime4: 62258
-    ctime5: 65535
+    ctime4: 58982
+    ctime5: 59637
     ctime6: 0
     ctime7: 0
     atime0: 0
@@ -127,6 +127,6 @@ MonoBehaviour:
     atime6: 0
     atime7: 0
     m_Mode: 0
-    m_ColorSpace: -1
+    m_ColorSpace: 0
     m_NumColorKeys: 6
     m_NumAlphaKeys: 2

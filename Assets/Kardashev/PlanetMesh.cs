@@ -1,25 +1,18 @@
 using System.Collections.Generic;
+using Kardashev.PlanetGeneration;
 using Shapes;
 using Unity.Mathematics;
 using UnityEngine;
-using UnityEngine.Serialization;
-using Random = UnityEngine.Random;
 
 namespace Kardashev
 {
-    public class PlanetMapRenderer : ImmediateModeShapeDrawer
+    public class PlanetMesh : ImmediateModeShapeDrawer
     {
-        private PlanetMap _map;
+        private Planet _map;
         
-        public PlanetMapChunk chunkPrefab;
-        
-        [Header("Tile Settings")]
-        [Range(0.6f, 0.9f)]
-        public float solidFactor = 0.75f;
+        public PlanetMeshChunk chunkPrefab;
 
         public int chunkResolution = 2;
-        
-        public Gradient pressureGradient;
         
         private void OnValidate()
         {
@@ -41,44 +34,37 @@ namespace Kardashev
                 // {
                 //     Draw.Cone(_map.TilePositions[tileIndex], _map.TileVelocities[tileIndex], 0.1f, math.length(_map.TileVelocities[tileIndex]));
                 // }
-                
-                // for (var spokeIndex = 0; spokeIndex < _map.Spokes.Length; spokeIndex++)
-                // {
-                //     var oppositeSpokeIndex = _map.TileSpokeOpposites[spokeIndex];
-                //     if (oppositeSpokeIndex > spokeIndex) continue;
-                //
-                //     if (_map.TilePlates[_map.Spokes[spokeIndex]] == _map.TilePlates[_map.Spokes[oppositeSpokeIndex]]) continue;
-                //
-                //     var (c1, c2) = _map.GetSpokeCorners(spokeIndex);
-                //     var pressure         = _map.SpokePressures[spokeIndex];
-                //     var relativePressure = math.remap(-3f, 3f, 0f, 1f, pressure);
-                //     Draw.Line(_map.TileCorners[c1], _map.TileCorners[c2], 0.1f, pressureGradient.Evaluate(relativePressure));
-                // }
             }
         }
         
-        public void Render(PlanetMap planetMap)
+        public void Render(Planet planet)
         {
-            _map  = planetMap;
+            _map?.Dispose();
+            _map  = planet;
+            
+            foreach (Transform child in transform)
+            {
+                Destroy(child.gameObject);
+            }
             
             Triangulate(_map);
         }
         
-        private void Triangulate(PlanetMap planetMap)
+        private void Triangulate(Planet planet)
         {
             var chunkCount = 6 * chunkResolution * chunkResolution;
-            var chunks = new List<PlanetMapChunk>();
+            var chunks = new List<PlanetMeshChunk>();
             
             for (var i = 0; i < chunkCount; i++)
             {
                 chunks.Add(Instantiate(chunkPrefab, transform));
             }
             
-            for (var i = 0; i < planetMap.TilePositions.Length; i++)
+            for (var i = 0; i < planet.TilePositions.Length; i++)
             {
-                var tile = planetMap.TilePositions[i];
+                var tile = planet.TilePositions[i];
                 var chunkId = GetCubemapTileChunkId(tile);
-                chunks[chunkId].Triangulate(planetMap, i);
+                chunks[chunkId].Triangulate(planet, i);
             }
             
             for (var i = 0; i < chunkCount; i++)

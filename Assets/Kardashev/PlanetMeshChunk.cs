@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Kardashev.PlanetGeneration;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -6,7 +7,7 @@ namespace Kardashev
 {
     [RequireComponent(typeof(MeshFilter))]
     [RequireComponent(typeof(MeshRenderer))]
-    public class PlanetMapChunk : MonoBehaviour
+    public class PlanetMeshChunk : MonoBehaviour
     {
         private Mesh _mesh;
         private readonly List<Vector3> _vertices = new();
@@ -37,122 +38,122 @@ namespace Kardashev
             _colors.Clear();
         }
         
-        public void Triangulate(PlanetMap planetMap, int tileIndex)
+        public void Triangulate(Planet planet, int tileIndex)
         {
-            var spokeIndices = planetMap.GetTileSpokeIndices(tileIndex);
+            var spokeIndices = planet.GetTileSpokeIndices(tileIndex);
             for (var i = 0; i < spokeIndices.Length; i++)
             {
-                Triangulate(planetMap, tileIndex, spokeIndices[i]);
+                Triangulate(planet, tileIndex, spokeIndices[i]);
             }
             spokeIndices.Dispose();
         }
         
-        private void Triangulate(PlanetMap planetMap, int tileIndex, int spokeIndex)
+        private void Triangulate(Planet planet, int tileIndex, int spokeIndex)
         {
-            var center = GetTileCenter(planetMap, tileIndex);
-            var v1     = center + GetFirstSolidCorner(planetMap, center, spokeIndex);
-            var v2     = center + GetSecondSolidCorner(planetMap, center, spokeIndex);
+            var center = GetTileCenter(planet, tileIndex);
+            var v1     = center + GetFirstSolidCorner(planet, center, spokeIndex);
+            var v2     = center + GetSecondSolidCorner(planet, center, spokeIndex);
             
-            var color = GetTileColor(planetMap, tileIndex);
+            var color = GetTileColor(planet, tileIndex);
 
             AddTriangle(center, v1, v2);
             AddTriangleColor(color);
 
-            TriangulateConnection(planetMap, tileIndex, spokeIndex, v1, v2);
+            TriangulateConnection(planet, tileIndex, spokeIndex, v1, v2);
         }
 
-        private Color GetTileColor(PlanetMap planetMap, int tileIndex)
+        private Color GetTileColor(Planet planet, int tileIndex)
         {
-            var elevation           = math.round(planetMap.TileElevations[tileIndex]);
-            var normalizedElevation = math.remap(-8, 8, 0, 1, elevation);
+            var elevation           = math.round(planet.TileElevations[tileIndex]);
+            var normalizedElevation = math.remap(-10, 10, 0, 1, elevation);
             var color               = elevationGradient.Evaluate(normalizedElevation);
             return color;
         }
         
-        private static float GetTileElevation(PlanetMap planetMap, int tileIndex)
+        private static float GetTileElevation(Planet planet, int tileIndex)
         {
             // return 0;
-            return math.round(planetMap.TileElevations[tileIndex]) * 0.5f;
+            return math.round(planet.TileElevations[tileIndex]) * 0.5f;
         }
 
-        private void TriangulateConnection(PlanetMap planetMap, int tileIndex, int spokeIndex, float3 v1, float3 v2)
+        private void TriangulateConnection(Planet planet, int tileIndex, int spokeIndex, float3 v1, float3 v2)
         {
-            var oppositeSpokeIndex = planetMap.TileSpokeOpposites[spokeIndex];
+            var oppositeSpokeIndex = planet.TileSpokeOpposites[spokeIndex];
             if (spokeIndex < oppositeSpokeIndex)
             {
-                var bridge = GetBridge(planetMap, spokeIndex);
+                var bridge = GetBridge(planet, spokeIndex);
                 var v3     = v1 + bridge;
                 var v4     = v2 + bridge;
                 
                 AddQuad(v1, v2, v3, v4);
                 AddQuadColor(
-                    GetTileColor(planetMap, planetMap.Spokes[spokeIndex]), 
-                    GetTileColor(planetMap, planetMap.Spokes[oppositeSpokeIndex]));
+                    GetTileColor(planet, planet.Spokes[spokeIndex]), 
+                    GetTileColor(planet, planet.Spokes[oppositeSpokeIndex]));
                 
             }
             
-            if (spokeIndex < PlanetMap.GetPreviousEdgeIndex(spokeIndex) &&
-                spokeIndex < PlanetMap.GetNextEdgeIndex(spokeIndex))
+            if (spokeIndex < Planet.GetPreviousEdgeIndex(spokeIndex) &&
+                spokeIndex < Planet.GetNextEdgeIndex(spokeIndex))
             {
-                var bridge = GetBridge(planetMap, spokeIndex);
+                var bridge = GetBridge(planet, spokeIndex);
                 var v4     = v2 + bridge;
                 
                 AddTriangle(
                     v2, 
                     v4,
-                    v2 + GetBridge(planetMap, planetMap.TileSpokeOpposites[PlanetMap.GetPreviousEdgeIndex(spokeIndex)]));
+                    v2 + GetBridge(planet, planet.TileSpokeOpposites[Planet.GetPreviousEdgeIndex(spokeIndex)]));
                 AddTriangleColor(
-                    GetTileColor(planetMap, planetMap.Spokes[spokeIndex]), 
-                    GetTileColor(planetMap, planetMap.Spokes[oppositeSpokeIndex]),
-                    GetTileColor(planetMap, planetMap.Spokes[PlanetMap.GetPreviousEdgeIndex(spokeIndex)]));
+                    GetTileColor(planet, planet.Spokes[spokeIndex]), 
+                    GetTileColor(planet, planet.Spokes[oppositeSpokeIndex]),
+                    GetTileColor(planet, planet.Spokes[Planet.GetPreviousEdgeIndex(spokeIndex)]));
             }
         }
 
-        private static float3 GetTileCenter(PlanetMap planetMap, int tileIndex)
+        private static float3 GetTileCenter(Planet planet, int tileIndex)
         {
-            var tileCorners = planetMap.GetTileCornerIndices(tileIndex);
+            var tileCorners = planet.GetTileCornerIndices(tileIndex);
             var center      = float3.zero;
             for (var i = 0; i < tileCorners.Length; i++)
             {
-                center += planetMap.TileCorners[tileCorners[i]];
+                center += planet.TileCorners[tileCorners[i]];
             }
             center /= tileCorners.Length;
             tileCorners.Dispose();
-            var elevation = GetTileElevation(planetMap, tileIndex);
+            var elevation = GetTileElevation(planet, tileIndex);
             center += math.normalize(center) * elevation;
             return center;
         }
 
-        private float3 GetFirstSolidCorner(PlanetMap planetMap, float3 center, int spokeIndex)
+        private float3 GetFirstSolidCorner(Planet planet, float3 center, int spokeIndex)
         {
-           return GetFirstCorner(planetMap, center, spokeIndex) * solidFactor;
+           return GetFirstCorner(planet, center, spokeIndex) * solidFactor;
         }
         
-        private float3 GetSecondSolidCorner(PlanetMap planetMap, float3 center, int spokeIndex)
+        private float3 GetSecondSolidCorner(Planet planet, float3 center, int spokeIndex)
         {
-            return GetSecondCorner(planetMap, center, spokeIndex)  * solidFactor;
+            return GetSecondCorner(planet, center, spokeIndex)  * solidFactor;
         }
         
-        private float3 GetFirstCorner(PlanetMap planetMap, float3 center, int spokeIndex)
+        private float3 GetFirstCorner(Planet planet, float3 center, int spokeIndex)
         {
-            var elevation = GetTileElevation(planetMap, planetMap.Spokes[spokeIndex]);
-            return planetMap.TileCorners[planetMap.GetSpokeCorners(spokeIndex).corner2] + math.normalize(center) * elevation - center;
+            var elevation = GetTileElevation(planet, planet.Spokes[spokeIndex]);
+            return planet.TileCorners[planet.GetSpokeCorners(spokeIndex).corner2] + math.normalize(center) * elevation - center;
         }
         
-        private float3 GetSecondCorner(PlanetMap planetMap, float3 center, int spokeIndex)
+        private float3 GetSecondCorner(Planet planet, float3 center, int spokeIndex)
         {
-            var elevation = GetTileElevation(planetMap, planetMap.Spokes[spokeIndex]);
+            var elevation = GetTileElevation(planet, planet.Spokes[spokeIndex]);
 
-            return planetMap.TileCorners[planetMap.GetSpokeCorners(spokeIndex).corner1] + math.normalize(center) * elevation - center;
+            return planet.TileCorners[planet.GetSpokeCorners(spokeIndex).corner1] + math.normalize(center) * elevation - center;
         }
 
-        private float3 GetBridge(PlanetMap planetMap, int spokeIndex)
+        private float3 GetBridge(Planet planet, int spokeIndex)
         {
-            var oppositeSpoke = planetMap.TileSpokeOpposites[spokeIndex];
-            var center = GetTileCenter(planetMap, planetMap.Spokes[spokeIndex]);
-            var otherCenter = GetTileCenter(planetMap, planetMap.Spokes[oppositeSpoke]);
-            var c1 = center + GetFirstSolidCorner(planetMap, center, spokeIndex);
-            var c2 = otherCenter + GetSecondSolidCorner(planetMap, otherCenter, oppositeSpoke);
+            var oppositeSpoke = planet.TileSpokeOpposites[spokeIndex];
+            var center = GetTileCenter(planet, planet.Spokes[spokeIndex]);
+            var otherCenter = GetTileCenter(planet, planet.Spokes[oppositeSpoke]);
+            var c1 = center + GetFirstSolidCorner(planet, center, spokeIndex);
+            var c2 = otherCenter + GetSecondSolidCorner(planet, otherCenter, oppositeSpoke);
             return c2 - c1;
         }
         

@@ -1,335 +1,475 @@
-using System;
+using Kardashev.PlanetGeneration;
+using Kardashev.PlanetGeneration.Jobs;
+using Sirenix.OdinInspector;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
-using UnityEngine.UIElements;
+using UnityEngine.Events;
+using UnityEngine.Serialization;
+using Random = UnityEngine.Random;
 
 namespace Kardashev
 {
-    public enum PlateType
-    {
-        Oceanic = 0,
-        Continental = 1
-    }
-    
-    public struct Plate
-    {
-        public int id;
-        public PlateType type;                // 0 = oceanic, 1 = continental
-        public float desiredElevation;
-        public float3 rotationAxis;     // The axis around which the plate rotates.
-        public float rotationRate;      // Angular velocity
-        public int seedTileIndex;       // The index of the tile from which the plate originates.
-        public Color color;
-    }
-    
-    public class PlanetMap : IDisposable
-    {
-        /// <summary>
-        /// Each entry represents a tile spoke by storing the index of the tile (seed) from which the spoke originates.
-        /// </summary>
-        public NativeList<int> Spokes;
+	public class PlanetMap : MonoBehaviour
+	{
+		[Header("Settings")] 
+		public uint seed = 1337;
+		
+		public PlanetSize size = PlanetSize.Medium;
+		private float _radius = 1f;
 
-        /// <summary>
-        /// For each tile spoke, stores the index of the opposite spoke (linking to the adjacent tile).
-        /// </summary>
-        public NativeList<int> TileSpokeOpposites;
+		[Header("Edge Flip Settings")]
+		[Range(0f, 0.1f)]
+		public float irregularity = 0.05f;
+		[Range(4, 5)]
+		[Tooltip("Minimum number of neighbors a tile must have")]
+		public int minimumNeighborCount = 5;
+		[Range(7,9)]
+        [Tooltip("Maximum number of neighbors a tile can have")]
+        public int maximumNeighborCount = 8;
+        [Range(0f, 1f)]
+		[Tooltip("Maximum allowed ratio difference between an original edge length and a flipped edge length.")]
+		public float maxEdgeLengthDifferenceRatio = 0.2f;
+		
+		[Header("Relaxation Settings")]
+		public int relaxationIterations = 10;
 
-        /// <summary>
-        /// For each tile, stores the index of one outgoing tile spoke.
-        /// </summary>
-        public NativeList<int> TileSpokes;
+		[Range(0f, 1f)] 
+		public float relaxationStrength = 1f;
+		
+		[Header("Output")]
+		public UnityEvent<Planet> onMapCreated;
+		
+		private void Awake()
+		{
+			Application.targetFrameRate = 75;
+		}
 
-        /// <summary>
-        /// Coordinates of tiles (seed points).
-        /// </summary>
-        public NativeList<float3> TilePositions;
+		[Button("Create Planet Map")]
+		private void CreateIcosahedronAndSubdividePlanetMap()
+		{
+			Random.InitState((int)seed);
+			
+			_radius = PlanetHelpers.Radius((int)size);;
+			var planetMap = CreateIcosahedronPlanetMap();
+			
+			for(var i = 0; i < (int)size; i++)
+			{
+				Subdivide(planetMap);
+			}
+			
+			var edgeFlipCount = (int)(planetMap.Spokes.Length * irregularity);
+			for(var relaxationStep = 0; relaxationStep < relaxationIterations; relaxationStep++)
+			{
+				for (var i = 0; i < edgeFlipCount / relaxationIterations; i++)
+				{
+					FlipRandomEdge(planetMap);
+				}
+				RelaxVertices(planetMap);
+			}
+			
+			onMapCreated?.Invoke(planetMap);
+		}
 
-        /// <summary>
-        /// Coordinates of tile corners (computed from the centers of triangles in the Delaunay triangulation).
-        /// </summary>
-        public NativeList<float3> TileCorners;
+		private Planet CreateIcosahedronPlanetMap()
+		{
+			var planetMap = new Planet(seed, size, Allocator.Persistent);
+			
+			var vertices = new NativeArray<float3>(Icosahedron.Vertices, Allocator.TempJob);
+			var assignBaseIcosahedronVerticesJob = new AssignBaseIcosahedronVerticesJob
+			{
+				Radius = PlanetHelpers.Radius((int)size),
+				Vertices = vertices,
+				TilePositions = planetMap.TilePositions
+			};
+			var assignBaseIcosahedronVerticesJobHandle = assignBaseIcosahedronVerticesJob.Schedule(vertices.Length, 64);
+			
+			var faces = new NativeArray<int3>(Icosahedron.Faces, Allocator.TempJob);
+			var edgeLookupTable = new NativeParallelHashMap<(int, int), int>(PlanetHelpers.SpokeCount((int)size), Allocator.TempJob);
+			var assignBaseIcosahedronFacesJob = new AssignBaseIcosahedronFacesJob
+			{
+				Faces = faces,
+				Spokes = planetMap.Spokes,
+				TileSpokes = planetMap.TileSpokes,
+				TilePositions = planetMap.TilePositions,
+				TileCorners = planetMap.TileCorners,
+				EdgeLookupTable = edgeLookupTable.AsParallelWriter(),
+			};
+			var assignBaseIcosahedronFacesJobHandle = assignBaseIcosahedronFacesJob.Schedule(faces.Length, 64, assignBaseIcosahedronVerticesJobHandle);
+			
+			var connectOppositeSpokesJob = new ConnectOppositeSpokesJob
+			{
+				Spokes = planetMap.Spokes,
+				TileSpokeOpposites = planetMap.TileSpokeOpposites,
+				EdgeLookupTable = edgeLookupTable
+			};
+			var connectOppositeSpokesJobHandle = connectOppositeSpokesJob.Schedule(planetMap.Spokes.Length, 64, assignBaseIcosahedronFacesJobHandle);
+			connectOppositeSpokesJobHandle.Complete();
 
-        /// <summary>
-        /// Tectonic plates on the planet.
-        /// </summary>
-        public NativeList<Plate> Plates;
-        
-        /// <summary>
-        /// For each tile, stores the index of the plate it belongs to.
-        /// </summary>
-        public NativeList<int> TilePlates;
+			edgeLookupTable.Dispose();
+			vertices.Dispose();
+			faces.Dispose();
+			return planetMap;
+		}
+		
+		#region Subdivision
 
-        /// <summary>
-        /// For each tile, stores the velocity of the tile.
-        /// </summary>
-        public NativeList<float3> TileVelocities;
-
-        /// <summary>
-        /// For each tile, stores the pressure stress on the tile.
-        /// </summary>
-        public NativeList<float> SpokePressures;
-        
-        /// <summary>
-        /// For each tile, stores teh shear stress on the tile.
-        /// </summary>
-        public NativeList<float> SpokeShears;
-
-        /// <summary>
-        /// For each tile, stores the elevation of the tile.
-        /// </summary>
-        public NativeList<float> TileElevations;
-
-        public PlanetMap(Allocator allocator)
+		private static void Subdivide(Planet planet)
         {
-            Spokes              = new NativeList<int>(allocator);
-            TileSpokeOpposites = new NativeList<int>(allocator);
-            TileSpokes         = new NativeList<int>(allocator);
-            TilePositions      = new NativeList<float3>(allocator);
-            TileCorners        = new NativeList<float3>(allocator);
-            Plates             = new NativeList<Plate>(allocator);
-            TilePlates         = new NativeList<int>(allocator);
-            TileVelocities     = new NativeList<float3>(allocator);
-            SpokePressures       = new NativeList<float>(allocator);
-            SpokeShears         = new NativeList<float>(allocator);
-            TileElevations     = new NativeList<float>(allocator);
-        }
-    
-        public void Dispose()
-        {
-            if (Spokes.IsCreated) Spokes.Dispose();
-            if (TileSpokeOpposites.IsCreated) TileSpokeOpposites.Dispose();
-            if (TileSpokes.IsCreated) TileSpokes.Dispose();
-            if (TilePositions.IsCreated) TilePositions.Dispose();
-            if (TileCorners.IsCreated) TileCorners.Dispose();
-            if (Plates.IsCreated) Plates.Dispose();
-            if (TilePlates.IsCreated) TilePlates.Dispose();
-            if (TileVelocities.IsCreated) TileVelocities.Dispose();
-            if (SpokePressures.IsCreated) SpokePressures.Dispose();
-            if (SpokeShears.IsCreated) SpokeShears.Dispose();
-            if (TileElevations.IsCreated) TileElevations.Dispose();
-        }
-
-        /// <summary>
-        /// Returns the index of the previous edge in a triangle.
-        /// </summary>
-        public static int GetPreviousEdgeIndex(int edgeIndex)
-        {
-            return edgeIndex % 3 == 0 
-                ? edgeIndex + 2 
-                : edgeIndex - 1;
-        }
-
-        /// <summary>
-        /// Returns the index of the next edge in a triangle.
-        /// </summary>
-        public static int GetNextEdgeIndex(int edgeIndex)
-        {
-            return edgeIndex % 3 == 2 
-                ? edgeIndex - 2 
-                : edgeIndex + 1;
-        }
-
-        /// <summary>
-        /// Returns all tile edges surrounding a given tile center (seed).
-        /// </summary>
-        public NativeList<int> GetTileSpokeIndices(int tileIndex)
-        {
-            var startEdge    = TileSpokes[tileIndex];
-            var currentEdge  = startEdge;
-            var oppositeEdge = -1;
-        
-            var loop = new NativeList<int>(Allocator.Temp);
-            do
-            {
-                loop.Add(currentEdge);
-                oppositeEdge = TileSpokeOpposites[currentEdge];
-                currentEdge  = GetNextEdgeIndex(oppositeEdge);
-            } while(oppositeEdge >= 0 && currentEdge != startEdge);
-        
-            return loop;
-        }
-    
-        /// <summary>
-        /// Returns the corner index corresponding to a given tile edge.
-        /// </summary>
-        public static int GetCornerIndex(int edgeIndex)
-        {
-            return edgeIndex / 3;
-        }
-
-        /// <summary>
-        /// Returns the indices of the three edges forming a corner (triangle).
-        /// </summary>
-        public static NativeArray<int> GetCornerEdgeIndices(int cornerIndex)
-        {
-            var edges = new NativeArray<int>(3, Allocator.Temp);
-            edges[0] = 3 * cornerIndex;
-            edges[1] = 3 * cornerIndex + 1;
-            edges[2] = 3 * cornerIndex + 2;
-            return edges;
-        }
-    
-        /// <summary>
-        /// Returns the indices of the tile centers (seeds) that form the given corner.
-        /// </summary>
-        public NativeArray<int> GetCornerTileIndices(int cornerIndex)
-        {
-            var tileIndices = new NativeArray<int>(3, Allocator.Temp);
-            tileIndices[0] = Spokes[3 * cornerIndex];
-            tileIndices[1] = Spokes[3 * cornerIndex + 1];
-            tileIndices[2] = Spokes[3 * cornerIndex + 2];
-            return tileIndices;
-        }
-    
-        /// <summary>
-        /// Returns the indices of the corners adjacent to the given corner.
-        /// </summary>
-        public NativeArray<int> GetCornerNeighborIndices(int cornerIndex)
-        {
-            var neighbors = new NativeArray<int>(3, Allocator.Temp);
-            neighbors[0] = GetCornerIndex(TileSpokeOpposites[3 * cornerIndex]);
-            neighbors[1] = GetCornerIndex(TileSpokeOpposites[3 * cornerIndex + 1]);
-            neighbors[2] = GetCornerIndex(TileSpokeOpposites[3 * cornerIndex + 2]);
-            return neighbors;
-        }
-
-    
-        /// <summary>
-        /// Returns all incoming tile edges for the specified tile center.
-        /// </summary>
-        public NativeArray<int> GetIncomingTileSpokeIndices(int tileIndex)
-        {
-            var edgeLoop      = GetTileSpokeIndices(tileIndex);
-            var incomingEdges = new NativeArray<int>(edgeLoop.Length, Allocator.Temp);
-            for (var i = 0; i < edgeLoop.Length; i++)
-            {
-                incomingEdges[i] = GetPreviousEdgeIndex(edgeLoop[i]);
-            }
-            edgeLoop.Dispose();
-            return incomingEdges;
-        }
-    
-        /// <summary>
-        /// Returns the neighboring tile centers (seeds) adjacent to the given tile center.
-        /// </summary>
-        public NativeArray<int> GetTileNeighborIndices(int tileIndex)
-        {
-            var edgeLoop  = GetTileSpokeIndices(tileIndex);
-            var neighbors = new NativeArray<int>(edgeLoop.Length, Allocator.Temp);
-            for (var i = 0; i < edgeLoop.Length; i++)
-            {
-                var nextEdge = GetNextEdgeIndex(edgeLoop[i]);
-                neighbors[i] = Spokes[nextEdge];
-            }
-            edgeLoop.Dispose();
-            return neighbors;
-        }
-    
-        /// <summary>
-        /// Returns the indices of the corners (tile vertices) that touch the specified tile center.
-        /// </summary>
-        public NativeArray<int> GetTileCornerIndices(int tileIndex)
-        {
-            var edgeLoop = GetTileSpokeIndices(tileIndex);
-            var corners  = new NativeArray<int>(edgeLoop.Length, Allocator.Temp);
-            for (var i = 0; i < edgeLoop.Length; i++)
-            {
-                corners[i] = GetCornerIndex(edgeLoop[i]);
-            }
-            edgeLoop.Dispose();
-            return corners;
-        }
-    
-        /// <summary>
-        /// Returns the two tile centers (seeds) connected by the specified tile edge.
-        /// </summary>
-        public (int fromTile, int toTile) GetSpokeTiles(int edgeIndex)
-        {
-            var fromTile = Spokes[edgeIndex];
-            var toTile   = Spokes[GetNextEdgeIndex(edgeIndex)];
-            return (fromTile, toTile);
-        }
-    
-        /// <summary>
-        /// Returns the two corners adjacent to the specified tile edge.
-        /// </summary>
-        public (int corner1, int corner2) GetSpokeCorners(int edgeIndex)
-        {
-            var corner1 = GetCornerIndex(edgeIndex);
-            var corner2 = GetCornerIndex(TileSpokeOpposites[edgeIndex]);
-            return (corner1, corner2);
-        }
-    
-        /// <summary>
-        /// Adds a new tile center (seed) to the planet map.
-        /// </summary>
-        public int AddTileCenter(float3 position)
-        {
-            TilePositions.Add(position);
-            TileSpokes.Add(-1);
-            TilePlates.Add(-1);
-            TileVelocities.Add(float3.zero);
-            TileElevations.Add(0);
-            return TilePositions.Length - 1;
-        }
-    
-        /// <summary>
-        /// Adds a new corner (computed from three tile centers) to the planet map.
-        /// </summary>
-        public int AddTileCorner(int tileAIndex, int tileBIndex, int tileCIndex, NativeHashMap<(int, int), int> edgeLookupTable)
-        {
-            var cornerIndex   = TileCorners.Length;
-            var baseEdgeIndex = Spokes.Length;
-        
-            // Add new tile spokes.
-            Spokes.Add(tileAIndex);
-            Spokes.Add(tileBIndex);
-            Spokes.Add(tileCIndex);
-        
-            // Initialize new spoke opposites.
-            TileSpokeOpposites.Add(-1);
-            TileSpokeOpposites.Add(-1);
-            TileSpokeOpposites.Add(-1);
+            var tempMap         = new Planet(planet.Seed, planet.Size, Allocator.Temp);
+            var edgeLookupTable = new NativeHashMap<(int, int), int>(0, Allocator.Temp);
             
-            SpokePressures.Add(0);
-            SpokePressures.Add(0);
-            SpokePressures.Add(0);
-            
-            SpokeShears.Add(0);
-            SpokeShears.Add(0);
-            SpokeShears.Add(0);
-        
-            // Calculate and store corner position.
-            var cornerPosition = (TilePositions[tileAIndex] + TilePositions[tileBIndex] + TilePositions[tileCIndex]) / 3;
-            TileCorners.Add(cornerPosition);
-
-            // Add spokes to tile if tile doesn't already have one.
-            if (TileSpokes[tileAIndex] == -1) TileSpokes[tileAIndex] = baseEdgeIndex;
-            if (TileSpokes[tileBIndex] == -1) TileSpokes[tileBIndex] = baseEdgeIndex + 1;
-            if (TileSpokes[tileCIndex] == -1) TileSpokes[tileCIndex] = baseEdgeIndex + 2;
-
-            // Link opposite spokes.
-            LinkOppositeSpoke(baseEdgeIndex, tileAIndex, tileBIndex, edgeLookupTable);
-            LinkOppositeSpoke(baseEdgeIndex + 1, tileBIndex, tileCIndex, edgeLookupTable);
-            LinkOppositeSpoke(baseEdgeIndex + 2, tileCIndex, tileAIndex, edgeLookupTable);
-        
-            return cornerIndex;
-        }
-
-        /// <summary>
-        /// Searches for and links the opposite tile edge for a newly added edge.
-        /// </summary>
-        private void LinkOppositeSpoke(int newEdgeIndex, int fromTile, int toTile, NativeHashMap<(int, int), int> edgeLookupTable)
-        {
-            // Look up the reverse edge key.
-            if (edgeLookupTable.TryGetValue((toTile, fromTile), out var oppositeSpokeIndex))
+            // Add all existing vertices to the temp map
+            var tileCount = PlanetHelpers.FirstFreeIndex(planet.TilePositions);
+            for (var i = 0; i < tileCount; i++)
             {
-                TileSpokeOpposites[oppositeSpokeIndex] = newEdgeIndex;
-                TileSpokeOpposites[newEdgeIndex]       = oppositeSpokeIndex;
+                PlanetHelpers.AddTileCenter(i, planet.TilePositions[i], tempMap.TilePositions);
             }
-            // Register this edge so future edges can find it.
-            edgeLookupTable[(fromTile, toTile)] = newEdgeIndex;
+
+            // Cache midpoints
+            var midpointLookup = new NativeHashMap<(int, int), int>(planet.Spokes.Length, Allocator.Temp);
+
+            var cornerCount = PlanetHelpers.FirstFreeIndex(planet.TileCorners);
+            for (var corner = 0; corner < cornerCount; corner++)
+            {
+                var baseEdge = corner * 3;
+                
+                // Get the three tile indices of the current corner.
+                var tileA = planet.Spokes[baseEdge];
+                var tileB = planet.Spokes[baseEdge + 1];
+                var tileC = planet.Spokes[baseEdge + 2];
+                
+                // Compute (or reuse) midpoints for each edge.
+                var abMidpoint = GetMidpointCornerIndex(tempMap, midpointLookup, tileA, tileB);
+                var bcMidpoint = GetMidpointCornerIndex(tempMap, midpointLookup, tileB, tileC);
+                var caMidpoint = GetMidpointCornerIndex(tempMap, midpointLookup, tileC, tileA);
+                
+                // Create four new corners to replace the original corner.
+                PlanetHelpers.AddTileCorner(
+	                corner * 4,
+	                tileA, 
+	                abMidpoint,
+	                caMidpoint,
+	                edgeLookupTable,
+	                tempMap.Spokes,
+	                tempMap.TileSpokes,
+	                tempMap.TileSpokeOpposites,
+	                tempMap.TilePositions,
+	                tempMap.TileCorners);
+                PlanetHelpers.AddTileCorner(
+					corner * 4 + 1,
+					tileB, 
+					bcMidpoint, 
+					abMidpoint, 
+					edgeLookupTable,
+	                tempMap.Spokes,
+	                tempMap.TileSpokes,
+	                tempMap.TileSpokeOpposites,
+	                tempMap.TilePositions,
+	                tempMap.TileCorners);
+                PlanetHelpers.AddTileCorner(
+					corner * 4 + 2,
+					tileC, 
+					caMidpoint, 
+					bcMidpoint, 
+					edgeLookupTable,
+	                tempMap.Spokes,
+	                tempMap.TileSpokes,
+	                tempMap.TileSpokeOpposites,
+	                tempMap.TilePositions,
+	                tempMap.TileCorners);
+                PlanetHelpers.AddTileCorner(
+					corner * 4 + 3,
+					abMidpoint, 
+					bcMidpoint, 
+					caMidpoint, 
+					edgeLookupTable,
+	                tempMap.Spokes,
+	                tempMap.TileSpokes,
+	                tempMap.TileSpokeOpposites,
+	                tempMap.TilePositions,
+	                tempMap.TileCorners);
+            }
+            midpointLookup.Dispose();
+            edgeLookupTable.Dispose();
+            
+            planet.Spokes.CopyFrom(tempMap.Spokes);
+            planet.TileSpokeOpposites.CopyFrom(tempMap.TileSpokeOpposites);
+            planet.TileSpokes.CopyFrom(tempMap.TileSpokes);
+            planet.TilePositions.CopyFrom(tempMap.TilePositions);
+            planet.TileCorners.CopyFrom(tempMap.TileCorners);
+            planet.TileElevations.CopyFrom(tempMap.TileElevations);
+            
+            tempMap.Dispose();
         }
-    }
+
+        private static int GetMidpointCornerIndex(Planet temp, NativeHashMap<(int, int), int> midpointLookup, int tileAIndex, int tileBIndex)
+        {
+            // Order the indices to ensure the key is consistent.
+            var key = (math.min(tileAIndex, tileBIndex), math.max(tileAIndex, tileBIndex));
+            if (midpointLookup.TryGetValue(key, out var midpointIndex))
+            {
+                return midpointIndex;
+            }
+            
+            // Compute the midpoint position.
+            var midpointPosition = (
+	            temp.TilePositions[tileAIndex] +
+	            temp.TilePositions[tileBIndex]) / 2;
+            
+            // Optionally, project the midpoint back onto the sphere.
+            midpointPosition = math.normalize(midpointPosition) * math.length(temp.TilePositions[tileAIndex]);
+            
+            // Add the midpoint as a new corner in the subdivided map.
+            midpointIndex = PlanetHelpers.AddTileCenter(
+	            midpointPosition,
+	            temp.TilePositions);
+            midpointLookup[key] = midpointIndex;
+            return midpointIndex;
+        }
+        
+        #endregion
+        
+        #region Edge Flip
+
+        private void FlipRandomEdge(Planet planet)
+        {
+	        var edgeIndex = Random.Range(0, planet.Spokes.Length);
+	        if (CanFlipEdge(planet, edgeIndex))
+	        {
+		        FlipEdge(planet, edgeIndex);
+	        }
+        }
+
+        private bool CanFlipEdge(Planet planet, int edgeIndex)
+        {
+	        var edgeOppositeIndex = planet.TileSpokeOpposites[edgeIndex];
+	        if(edgeOppositeIndex == -1)
+	        {
+		        // Debug.Log("Edge Opposite not set");
+		        return false;
+	        }
+	        
+	        var tileAIndex = planet.Spokes[edgeIndex];
+	        var tileBIndex = planet.Spokes[edgeOppositeIndex];
+	        var tileCIndex = planet.Spokes[Planet.GetPreviousEdgeIndex(edgeIndex)];
+	        var tileDIndex = planet.Spokes[Planet.GetPreviousEdgeIndex(edgeOppositeIndex)];
+	        
+	        var tileASpokeIndices = PlanetHelpers.TileSpokeIndices(tileAIndex, planet.TileSpokes, planet.TileSpokeOpposites);
+	        if (tileASpokeIndices.Length <= minimumNeighborCount)
+	        {
+		        // Debug.Log("Tile A has too few neighbors: " + tileASpokeIndices.Length);
+		        tileASpokeIndices.Dispose();
+		        return false;
+	        }
+	        
+	        var tileBSpokeIndices = PlanetHelpers.TileSpokeIndices(tileBIndex, planet.TileSpokes, planet.TileSpokeOpposites);
+	        if (tileBSpokeIndices.Length <= minimumNeighborCount)
+	        {
+		        // Debug.Log("Tile B has too few neighbors: " + tileBIndex);
+		        tileBSpokeIndices.Dispose();
+		        return false;
+	        }
+	        
+	        var tileCSpokeIndices = PlanetHelpers.TileSpokeIndices(tileCIndex, planet.TileSpokes, planet.TileSpokeOpposites);
+	        if (tileCSpokeIndices.Length >= maximumNeighborCount)
+	        {
+		        // Debug.Log("Tile C has too many neighbors: " + tileCIndex);
+		        tileCSpokeIndices.Dispose();
+		        return false;
+	        }
+	        
+	        var tileDSpokeIndices = PlanetHelpers.TileSpokeIndices(tileDIndex, planet.TileSpokes, planet.TileSpokeOpposites);
+	        if (tileDSpokeIndices.Length >= maximumNeighborCount)
+	        {
+		        // Debug.Log("Tile D has too many neighbors: " + tileDIndex);
+		        tileDSpokeIndices.Dispose();
+		        return false;
+	        }
+	        
+	        var originalLength = math.distance(planet.TilePositions[tileAIndex], planet.TilePositions[tileBIndex]);
+	        var flippedLength = math.distance(planet.TilePositions[tileCIndex], planet.TilePositions[tileDIndex]);
+	        var lengthDifferenceRatio = (flippedLength - originalLength) / ((originalLength + flippedLength) / 2);
+	        if (lengthDifferenceRatio > maxEdgeLengthDifferenceRatio)
+	        {
+		        // Debug.Log("Edge length difference ratio is too high");
+		        return false;
+	        }
+	        
+	        if (HasObtuseAngle(planet, edgeIndex))
+	        {
+		        // Debug.Log("Has obtuse angle");
+		        return false;
+	        }
+
+	        return true;
+        }
+        
+        private bool HasObtuseAngle(Planet map, int edgeIndex)
+        {
+	        // For both triangles sharing the edge, compute the angle at the vertices along the shared edge.
+	        var angle1 = GetAngleAtSharedEdge(map, edgeIndex, side: 0);
+	        var angle2 = GetAngleAtSharedEdge(map, edgeIndex, side: 1);
+	        // If either angle is greater than 90 degrees, return true.
+	        return (angle1 > math.PI / 2f || angle2 > math.PI / 2f);
+        }
+        
+        /// <summary>
+        /// For the triangle on the given side of the half-edge, compute the angle at the vertex that is opposite the shared edge.
+        /// The shared edge is defined by the half-edge passed in; the "other" triangle is accessed via its opposite pointer if side==1.
+        /// </summary>
+        private float GetAngleAtSharedEdge(Planet map, int edgeIndex, int side)
+        {
+	        // If we are checking side 1 (the triangle opposite to the given half-edge),
+	        // then use the opposite half-edge.
+	        if (side == 1)
+	        {
+		        var oppositeEdge = map.TileSpokeOpposites[edgeIndex];
+		        if (oppositeEdge == -1)
+		        {
+			        // If there is no opposite (i.e. boundary edge), return 0 or some default.
+			        return 0f;
+		        }
+		        edgeIndex = oppositeEdge;
+	        }
+    
+	        // For the triangle associated with the half-edge at edgeIndex,
+	        // we assume the triangle is stored as three consecutive half-edges:
+	        // A = map.Tiles[edgeIndex] (start of the shared edge),
+	        // B = map.Tiles[GetNextEdgeIndex(edgeIndex)] (end of the shared edge),
+	        // C = map.Tiles[GetPreviousEdgeIndex(edgeIndex)] (the vertex opposite the shared edge).
+	        var tileAIndex = map.Spokes[edgeIndex];
+	        var tileBIndex = map.Spokes[PlanetHelpers.NextEdgeIndex(edgeIndex)];
+	        var tileCIndex = map.Spokes[PlanetHelpers.PreviousEdgeIndex(edgeIndex)];
+    
+	        var posA = map.TilePositions[tileAIndex];
+	        var posB = map.TilePositions[tileBIndex];
+	        var posC = map.TilePositions[tileCIndex];
+    
+	        // Compute vectors from vertex C (the opposite vertex) to A and to B.
+	        var v1 = posA - posC;
+	        var v2 = posB - posC;
+    
+	        // Calculate the cosine of the angle at C.
+	        var dot      = math.dot(v1, v2);
+	        var mag1     = math.length(v1);
+	        var mag2     = math.length(v2);
+	        var cosTheta = dot / (mag1 * mag2);
+	        // Clamp to avoid domain errors due to floating point inaccuracies.
+	        cosTheta = math.clamp(cosTheta, -1f, 1f);
+	        var angle = math.acos(cosTheta);
+	        return angle;
+        }
+
+        private void FlipEdge(Planet planet, int edgeIndex)
+        {
+	        // Get all pre-flipped indices.
+	        var abIndex = edgeIndex;
+	        var bcIndex = PlanetHelpers.NextEdgeIndex(abIndex);
+	        var cbIndex = planet.TileSpokeOpposites[bcIndex];
+	        var caIndex = PlanetHelpers.PreviousEdgeIndex(abIndex);
+	        var acIndex = planet.TileSpokeOpposites[caIndex];
+	        
+	        var baIndex = planet.TileSpokeOpposites[abIndex];
+	        var adIndex = PlanetHelpers.NextEdgeIndex(baIndex);
+	        var daIndex = planet.TileSpokeOpposites[adIndex];
+	        var dbIndex = PlanetHelpers.PreviousEdgeIndex(baIndex);
+	        var bdIndex = planet.TileSpokeOpposites[dbIndex];
+	        
+	        var aIndex = planet.Spokes[abIndex];
+	        var bIndex = planet.Spokes[bcIndex];
+	        var cIndex = planet.Spokes[caIndex];
+	        var dIndex = planet.Spokes[daIndex];
+	        
+	        var abcCornerIndex = PlanetHelpers.CornerIndex(abIndex);
+	        var abdCornerIndex = PlanetHelpers.CornerIndex(baIndex);
+
+	        // Reassign Triangles
+	        planet.Spokes[abIndex] = dIndex;
+	        planet.Spokes[bcIndex] = cIndex;
+	        planet.Spokes[caIndex] = aIndex;
+	        
+	        planet.Spokes[baIndex] = cIndex;
+	        planet.Spokes[adIndex] = dIndex;
+	        planet.Spokes[dbIndex] = bIndex;
+	        
+	        planet.TileCorners[abcCornerIndex] = (planet.TilePositions[aIndex] + planet.TilePositions[cIndex] + planet.TilePositions[dIndex]) / 3;
+	        planet.TileCorners[abdCornerIndex] = (planet.TilePositions[bIndex] + planet.TilePositions[cIndex] + planet.TilePositions[dIndex]) / 3;
+
+	        planet.TileSpokes[aIndex] = caIndex;
+	        planet.TileSpokes[bIndex] = dbIndex;
+	        planet.TileSpokes[cIndex] = bcIndex;
+	        planet.TileSpokes[dIndex] = adIndex;
+	        
+	        // Reassign Edge Opposites.
+	        planet.TileSpokeOpposites[caIndex] = daIndex;
+	        planet.TileSpokeOpposites[daIndex] = caIndex;
+	        
+	        planet.TileSpokeOpposites[adIndex] = bdIndex;
+	        planet.TileSpokeOpposites[bdIndex]   = adIndex;
+	        
+	        planet.TileSpokeOpposites[dbIndex] = cbIndex;
+	        planet.TileSpokeOpposites[cbIndex]   = dbIndex;
+	        
+	        planet.TileSpokeOpposites[bcIndex] = acIndex;
+	        planet.TileSpokeOpposites[acIndex]   = bcIndex;
+        }
+        
+        #endregion
+        
+        #region Vertex Relaxation
+        
+        private void RelaxVertices(Planet planet)
+        {
+	        // Create a temporary copy of the vertex positions.
+	        var newTilePositions = new NativeArray<float3>(planet.TilePositions.Length, Allocator.Temp);
+	        for (var tileIndex = 0; tileIndex < planet.TilePositions.Length; tileIndex++)
+	        {
+		        // Get the neighboring vertices (using your connectivity method).
+		        var neighbors = PlanetHelpers.TileNeighborIndices(tileIndex, planet.Spokes, planet.TileSpokes, planet.TileSpokeOpposites);
+		        var centroid  = float3.zero;
+		        for (var neighborIndex = 0; neighborIndex < neighbors.Length; neighborIndex++)
+		        {
+			        centroid += planet.TilePositions[neighbors[neighborIndex]];
+		        }
+		        centroid /= neighbors.Length;
+		        neighbors.Dispose();
+
+		        // Reproject onto the sphere.
+		        newTilePositions[tileIndex] = math.normalize(centroid) * _radius;
+	        }
+	        // Update the map with the new positions.
+	        for (var i = 0; i < planet.TilePositions.Length; i++)
+	        {
+		        planet.TilePositions[i] = math.lerp(planet.TilePositions[i], newTilePositions[i], relaxationStrength);
+	        }
+	        newTilePositions.Dispose();
+	        
+	        UpdateTileCorners(planet);
+        }
+        
+        private void UpdateTileCorners(Planet planet)
+        {
+	        // Each triangle (or face) is stored in 3 consecutive entries in Tiles.
+	        var cornerCount = planet.TileCorners.Length;
+	        for (var cornerIndex = 0; cornerIndex < cornerCount; cornerIndex++)
+	        {
+		        // var baseIndex  = i * 3;
+		        var centroid = float3.zero;
+		        var tiles    = planet.GetCornerTileIndices(cornerIndex);
+		        for(var tileIndex = 0; tileIndex < tiles.Length; tileIndex++)
+		        {
+			        centroid += planet.TilePositions[tiles[tileIndex]];
+		        }
+		        centroid /= 3;
+		        tiles.Dispose();
+        
+		        // The corner is computed as the centroid of the triangle.
+		        planet.TileCorners[cornerIndex] = math.lerp(planet.TileCorners[cornerIndex], centroid, relaxationStrength);
+	        }
+        }
+		
+        #endregion
+	}
 }
