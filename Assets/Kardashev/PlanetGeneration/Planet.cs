@@ -46,6 +46,11 @@ namespace Kardashev.PlanetGeneration
         /// </summary>
         public NativeArray<float> TileElevations;
 
+        /// <summary>
+        /// For each tile, stores the temperature of the tile.
+        /// </summary>
+        public NativeArray<float> TileTemperatures;
+
         public Planet(uint seed, PlanetSize size, Allocator allocator)
         {
             var spokeCount = PlanetHelpers.SpokeCount((int)size);
@@ -72,6 +77,9 @@ namespace Kardashev.PlanetGeneration
             
             TileElevations     = new NativeArray<float>(tileCount, allocator);
             Initialize(TileElevations, tileCount, 0);
+            
+            TileTemperatures   = new NativeArray<float>(tileCount, allocator);
+            Initialize(TileTemperatures, tileCount, 0);
         }
         
         private static void Initialize<T>(NativeArray<T> array, int count, T value) where T : unmanaged
@@ -88,6 +96,7 @@ namespace Kardashev.PlanetGeneration
             if (TilePositions.IsCreated) TilePositions.Dispose();
             if (TileCorners.IsCreated) TileCorners.Dispose();
             if (TileElevations.IsCreated) TileElevations.Dispose();
+            if (TileTemperatures.IsCreated) TileTemperatures.Dispose();
         }
 
         /// <summary>

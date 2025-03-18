@@ -1,6 +1,6 @@
 using Unity.Mathematics;
 
-namespace Kardashev
+namespace Kardashev.PlanetGeneration
 {
 	public struct CyclonePoint
 	{

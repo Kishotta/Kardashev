@@ -100,18 +100,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   solidFactor: 0.85
+  renderLayer: 1
   elevationGradient:
     serializedVersion: 2
-    key0: {r: 0.1764706, g: 0.31764707, b: 0.57254905, a: 1}
-    key1: {r: 0.64705884, g: 0.83921576, b: 0.9686275, a: 1}
-    key2: {r: 0.8666667, g: 0.84410393, b: 0.31372547, a: 0}
-    key3: {r: 0.40000004, g: 0.4431373, b: 0.17254902, a: 0}
-    key4: {r: 0.35686275, g: 0.3137255, b: 0.3529412, a: 0}
+    key0: {r: 0.09892311, g: 0.25533146, b: 0.5377358, a: 1}
+    key1: {r: 0.4481132, g: 0.77789915, b: 1, a: 1}
+    key2: {r: 0.8405637, g: 0.8679245, b: 0.31523672, a: 0}
+    key3: {r: 0.385513, g: 0.5377358, b: 0.11414205, a: 0}
+    key4: {r: 0.3301887, g: 0.26010147, b: 0.32381713, a: 0}
     key5: {r: 1, g: 1, b: 1, a: 0}
     key6: {r: 0, g: 0, b: 0, a: 0}
     key7: {r: 0, g: 0, b: 0, a: 0}
     ctime0: 0
-    ctime1: 32112
+    ctime1: 31997
     ctime2: 32768
     ctime3: 49151
     ctime4: 58982
@@ -129,4 +130,34 @@ MonoBehaviour:
     m_Mode: 0
     m_ColorSpace: 0
     m_NumColorKeys: 6
+    m_NumAlphaKeys: 2
+  temperatureGradient:
+    serializedVersion: 2
+    key0: {r: 0, g: 0, b: 1, a: 1}
+    key1: {r: 0, g: 1, b: 1, a: 1}
+    key2: {r: 0, g: 1, b: 0, a: 0}
+    key3: {r: 1, g: 1, b: 0, a: 0}
+    key4: {r: 1, g: 0, b: 0, a: 0}
+    key5: {r: 0, g: 0, b: 0, a: 0}
+    key6: {r: 0, g: 0, b: 0, a: 0}
+    key7: {r: 0, g: 0, b: 0, a: 0}
+    ctime0: 0
+    ctime1: 16384
+    ctime2: 32768
+    ctime3: 49151
+    ctime4: 65535
+    ctime5: 0
+    ctime6: 0
+    ctime7: 0
+    atime0: 0
+    atime1: 65535
+    atime2: 0
+    atime3: 0
+    atime4: 0
+    atime5: 0
+    atime6: 0
+    atime7: 0
+    m_Mode: 0
+    m_ColorSpace: 0
+    m_NumColorKeys: 5
     m_NumAlphaKeys: 2

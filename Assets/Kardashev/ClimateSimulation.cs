@@ -1,5 +1,5 @@
-using System.Security.Cryptography.X509Certificates;
 using Kardashev.PlanetGeneration;
+using Kardashev.PlanetGeneration.Jobs;
 using Shapes;
 using Unity.Collections;
 using Unity.Jobs;
@@ -88,7 +88,15 @@ namespace Kardashev
 				PrevalentWinds    = _prevalentWinds
 			};
 			var calculatePrevalentWindsJobHandle = calculatePrevalentWindsJob.Schedule(planet.TilePositions.Length, 64, createCyclonePointsJobHandle);
-			calculatePrevalentWindsJobHandle.Complete();
+			
+			var calculateBaseTemperatureJob = new CalculateBaseTemperatureJob
+			{
+				TilePositions     = planet.TilePositions,
+				TileElevations    = planet.TileElevations,
+				BaseTemperatures  = planet.TileTemperatures,
+			};
+			var calculateBaseTemperatureJobHandle = calculateBaseTemperatureJob.Schedule(planet.TilePositions.Length, 64, calculatePrevalentWindsJobHandle);
+			calculateBaseTemperatureJobHandle.Complete();
 			
 			cyclonePoints.Dispose();
 			

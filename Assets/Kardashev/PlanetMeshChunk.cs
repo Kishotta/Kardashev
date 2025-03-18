@@ -5,6 +5,13 @@ using UnityEngine;
 
 namespace Kardashev
 {
+    public enum RenderLayer
+    {
+        Elevation,
+        Temperature,
+        ElevationTemperature,
+    }
+    
     [RequireComponent(typeof(MeshFilter))]
     [RequireComponent(typeof(MeshRenderer))]
     public class PlanetMeshChunk : MonoBehaviour
@@ -18,7 +25,11 @@ namespace Kardashev
         [Range(0.6f, 0.9f)]
         public float solidFactor = 0.75f;
         
+        [Header("Render Settings")]
+        public RenderLayer renderLayer = RenderLayer.Elevation;
+        
         public Gradient elevationGradient;
+        public Gradient temperatureGradient;
         
         private void Awake()
         {
@@ -66,8 +77,18 @@ namespace Kardashev
         {
             var elevation           = math.round(planet.TileElevations[tileIndex]);
             var normalizedElevation = math.remap(-10, 10, 0, 1, elevation);
-            var color               = elevationGradient.Evaluate(normalizedElevation);
-            return color;
+            var elevationColor      = elevationGradient.Evaluate(normalizedElevation);
+            
+            var temperature         = planet.TileTemperatures[tileIndex];
+            var normalizedTemperature = math.remap(-20, 40, 0, 1, temperature);
+            var temperatureColor               = temperatureGradient.Evaluate(normalizedTemperature);
+            return renderLayer switch
+            {
+                RenderLayer.Temperature => temperatureColor,
+                RenderLayer.Elevation    => elevationColor,
+                RenderLayer.ElevationTemperature => temperatureColor * elevationColor,
+                _ => Color.white
+            };
         }
         
         private static float GetTileElevation(Planet planet, int tileIndex)

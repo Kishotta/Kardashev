@@ -354,6 +354,7 @@ namespace Kardashev
             planet.TilePositions.CopyFrom(tempMap.TilePositions);
             planet.TileCorners.CopyFrom(tempMap.TileCorners);
             planet.TileElevations.CopyFrom(tempMap.TileElevations);
+            planet.TileTemperatures.CopyFrom(tempMap.TileTemperatures);
             
             tempMap.Dispose();
         }
