@@ -93,8 +93,8 @@ namespace Kardashev
         
         private static float GetTileElevation(Planet planet, int tileIndex)
         {
-            return 0;
-            // return math.round(planet.TileElevations[tileIndex]) * 0.5f;
+            // return 0;
+            return math.round(planet.TileElevations[tileIndex]) * 0.5f;
         }
 
         private void TriangulateConnection(Planet planet, int tileIndex, int spokeIndex, float3 v1, float3 v2)

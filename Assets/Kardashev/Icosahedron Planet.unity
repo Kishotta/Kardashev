@@ -251,6 +251,7 @@ GameObject:
   - component: {fileID: 407586239}
   - component: {fileID: 407586238}
   - component: {fileID: 407586240}
+  - component: {fileID: 407586241}
   - component: {fileID: 407586237}
   m_Layer: 0
   m_Name: Planet
@@ -273,7 +274,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   useCullingMasks: 1
   chunkPrefab: {fileID: 7549329182483469421, guid: dd237026652003b4db964b8b5abed049, type: 3}
-  chunkResolution: 10
+  chunkResolution: 3
 --- !u!114 &407586238
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -287,7 +288,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   seed: 1337
-  size: 5
+  size: 4
   irregularity: 0.04
   minimumNeighborCount: 5
   maximumNeighborCount: 8
@@ -336,7 +337,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a741d8325cb04b89b01b16f866cc6ced, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  plateCount: 70
+  plateCount: 12
   oceanicPlateRatio: 0.7
   maxOceanicPlateDesiredElevation: -1
   minOceanicPlateDesiredElevation: -7
@@ -446,8 +447,40 @@ MonoBehaviour:
   onPlateTectonicsSimulated:
     m_PersistentCalls:
       m_Calls:
+      - m_Target: {fileID: 407586241}
+        m_TargetAssemblyTypeName: Kardashev.ClimateSimulation, Assembly-CSharp
+        m_MethodName: Simulate
+        m_Mode: 0
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
+--- !u!114 &407586241
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 407586234}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e65b91cb43c54aa791143cd469ee104c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  useCullingMasks: 0
+  cycloneCount: 10
+  debugWindScale: 1
+  minWindSpeed: 20
+  maxWindSpeed: 50
+  onClimateSimulated:
+    m_PersistentCalls:
+      m_Calls:
       - m_Target: {fileID: 407586237}
-        m_TargetAssemblyTypeName: Kardashev.PlanetMapRenderer, Assembly-CSharp
+        m_TargetAssemblyTypeName: Kardashev.PlanetMesh, Assembly-CSharp
         m_MethodName: Render
         m_Mode: 0
         m_Arguments:

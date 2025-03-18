@@ -19,6 +19,7 @@ namespace Kardashev
 		[Range(3, 20)] 
 		public int cycloneCount = 10;
 
+		public bool showDebugWind = true;
 		[Range(1f, 10f)]
 		public float debugWindScale = 1f;
 
@@ -39,16 +40,16 @@ namespace Kardashev
 		
 		public override void DrawShapes( Camera cam ){
 
-			using( Draw.Command( cam ) ){
-
-				if (_planet != null)
+			using( Draw.Command( cam ) )
+			{
+				if (_planet == null) return;
+				if (!showDebugWind) return;
+				for (var i = 0; i < _planet.TilePositions.Length; ++i)
 				{
-					for (var i = 0; i < _planet.TilePositions.Length; ++i)
-					{
-						var tilePosition = _planet.TilePositions[i];
-						var wind		 = _prevalentWinds[i];
-						Draw.Line(tilePosition, tilePosition + wind * debugWindScale, 0.2f, Color.white);
-					}
+					var tilePosition = _planet.TilePositions[i] + math.normalize(_planet.TilePositions[i]) *
+						(_planet.TileElevations[i] * 0.5f + 0.2f);
+					var wind         = _prevalentWinds[i];
+					Draw.Line(tilePosition, tilePosition + wind * debugWindScale, 0.2f, Color.white);
 				}
 			}
 
@@ -96,9 +97,47 @@ namespace Kardashev
 				BaseTemperatures  = planet.TileTemperatures,
 			};
 			var calculateBaseTemperatureJobHandle = calculateBaseTemperatureJob.Schedule(planet.TilePositions.Length, 64, calculatePrevalentWindsJobHandle);
-			calculateBaseTemperatureJobHandle.Complete();
+
+			var cachedBasedTemperatures = new NativeArray<float>(planet.TileTemperatures.Length, Allocator.TempJob);
+			var copyBaseTemperaturesJob = new CopyValuesJob<float>
+			{
+				Source      = planet.TileTemperatures,
+				Destination = cachedBasedTemperatures,
+			};
+			var cacheBaseTemperaturesJobHandle = copyBaseTemperaturesJob.Schedule(planet.TileTemperatures.Length, 64, calculateBaseTemperatureJobHandle);
+
+			var simulationSteps         = (int)math.round(2 * math.PI * PlanetHelpers.Radius((int)planet.Size));
+			var heatAdvectionDependency = cacheBaseTemperaturesJobHandle;
+			var temperatureBuffer       = new NativeArray<float>(planet.TileTemperatures.Length, Allocator.TempJob);
+			for (var step = 0; step < simulationSteps; step++)
+			{
+				var heatAdvectionJob = new HeatAdvectionJob
+				{
+					Spokes             = planet.Spokes,
+					TileSpokes         = planet.TileSpokes,
+					TileSpokeOpposites = planet.TileSpokeOpposites,
+					TilePositions      = planet.TilePositions,
+					TileElevations     = planet.TileElevations,
+					TileWinds          = _prevalentWinds,
+					BaseTemperatures   = cachedBasedTemperatures,
+					TileTemperatures   = planet.TileTemperatures,
+					NewTemperatures    = temperatureBuffer,
+					AdvectionFactor    = 0.2f,
+					ForcingFactor      = 0.05f,
+				};
+				var heatAdvectionJobHandle = heatAdvectionJob.Schedule(planet.TilePositions.Length, 64, heatAdvectionDependency);
+
+				var swapTemperatureBufferJob = new CopyValuesJob<float>
+				{
+					Source      = temperatureBuffer,
+					Destination = planet.TileTemperatures,
+				};
+				heatAdvectionDependency = swapTemperatureBufferJob.Schedule(planet.TilePositions.Length, 64, heatAdvectionJobHandle);
+			}
+			heatAdvectionDependency.Complete();
 			
 			cyclonePoints.Dispose();
+			temperatureBuffer.Dispose();
 			
 			onClimateSimulated?.Invoke(planet);
 		}

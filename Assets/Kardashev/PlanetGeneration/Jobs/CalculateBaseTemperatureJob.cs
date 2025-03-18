@@ -3,7 +3,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 
-namespace Kardashev
+namespace Kardashev.PlanetGeneration.Jobs
 {
 	[BurstCompile]
 	public struct CalculateBaseTemperatureJob : IJobParallelFor
@@ -25,7 +25,7 @@ namespace Kardashev
 			var baseTemperature = math.lerp(equatorialTemperature, polarTemperature, lattitude);
 			var isUnderwater = tileElevation < 0;
 			var lapseRate       = isUnderwater ? -1.5f : -3f;
-			var elevationAdjustment = TileElevations[tileIndex] * lapseRate;
+			var elevationAdjustment = math.abs(TileElevations[tileIndex]) * lapseRate;
 			
 			BaseTemperatures[tileIndex] = baseTemperature + elevationAdjustment;
 		}
