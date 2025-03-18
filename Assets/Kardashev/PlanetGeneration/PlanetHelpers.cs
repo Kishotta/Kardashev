@@ -221,7 +221,7 @@ namespace Kardashev.PlanetGeneration
 			int tileAIndex, 
 			int tileBIndex, 
 			int tileCIndex, 
-			NativeHashMap<(int, int), int> edgeLookupTable,
+			NativeParallelHashMap<int2, int> edgeLookupTable,
 			NativeArray<int> spokes,
 			NativeArray<int> tileSpokes,
 			NativeArray<int> tileSpokeOpposites,
@@ -267,17 +267,17 @@ namespace Kardashev.PlanetGeneration
 			int newEdgeIndex,
 			int fromTile, 
 			int toTile,
-			NativeHashMap<(int, int), int> edgeLookupTable,
+			NativeParallelHashMap<int2, int> edgeLookupTable,
 			NativeArray<int> tileSpokeOpposites)
 		{
 			// Look up the reverse edge key.
-			if (edgeLookupTable.TryGetValue((toTile, fromTile), out var oppositeSpokeIndex))
+			if (edgeLookupTable.TryGetValue(new int2(toTile, fromTile), out var oppositeSpokeIndex))
 			{
 				tileSpokeOpposites[oppositeSpokeIndex] = newEdgeIndex;
 				tileSpokeOpposites[newEdgeIndex]       = oppositeSpokeIndex;
 			}
 			// Register this edge so future edges can find it.
-			edgeLookupTable[(fromTile, toTile)] = newEdgeIndex;
+			edgeLookupTable[new int2(fromTile, toTile)] = newEdgeIndex;
 		}
 	}
 }

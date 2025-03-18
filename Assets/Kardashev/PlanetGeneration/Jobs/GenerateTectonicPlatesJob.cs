@@ -13,6 +13,7 @@ namespace Kardashev.PlanetGeneration.Jobs
 		public NativeArray<Random> RandomNumberGenerators;
 			
 		public int TileCount;
+		public int PlateCount;
 		public float OceanicPlateRatio;
 		public float MinOceanicPlateDesiredElevation;
 		public float MaxOceanicPlateDesiredElevation;
@@ -28,7 +29,7 @@ namespace Kardashev.PlanetGeneration.Jobs
 		{
 			var rnd           = RandomNumberGenerators[plateIndex];
 			var seedTileIndex = rnd.NextInt(TileCount);
-			var plateType     = rnd.NextFloat() < OceanicPlateRatio ? PlateType.Oceanic : PlateType.Continental;
+			var plateType     = plateIndex / (float)PlateCount < OceanicPlateRatio ? PlateType.Oceanic : PlateType.Continental;
 			var minDesiredElevation = plateType == PlateType.Oceanic
 				? MinOceanicPlateDesiredElevation
 				: MinContinentalPlateDesiredElevation;

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Kardashev.PlanetGeneration;
 using Kardashev.PlanetGeneration.Jobs;
 using Sirenix.OdinInspector;
@@ -6,7 +7,6 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Events;
-using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
 
 namespace Kardashev
@@ -54,7 +54,7 @@ namespace Kardashev
 			
 			var vertices = new NativeArray<float3>(Icosahedron.Vertices, Allocator.TempJob);
 			var faces = new NativeArray<int3>(Icosahedron.Faces, Allocator.TempJob);
-			var edgeLookupTable = new NativeParallelHashMap<(int, int), int>(PlanetHelpers.SpokeCount((int)size), Allocator.TempJob);
+			var edgeLookupTable = new NativeParallelHashMap<int2, int>(PlanetHelpers.SpokeCount((int)size), Allocator.TempJob);
 			
 			var assignBaseIcosahedronVerticesJobHandle = AssignBaseIcosahedronVertices(vertices, planetMap);
 			var assignBaseIcosahedronFacesJobHandle = AssignBaseIcosahedronFaces(faces, planetMap, edgeLookupTable, assignBaseIcosahedronVerticesJobHandle);
@@ -99,7 +99,7 @@ namespace Kardashev
 		private static JobHandle AssignBaseIcosahedronFaces(
 			NativeArray<int3> faces,
 			Planet planetMap,
-			NativeParallelHashMap<(int, int), int> edgeLookupTable,
+			NativeParallelHashMap<int2, int> edgeLookupTable,
 			JobHandle dependencies)
 		{
 			var assignBaseIcosahedronFacesJob = new AssignBaseIcosahedronFacesJob
@@ -116,7 +116,7 @@ namespace Kardashev
 		
 		private static JobHandle ConnectOppositeSpokes(
 			Planet planetMap, 
-			NativeParallelHashMap<(int, int), int> edgeLookupTable, 
+			NativeParallelHashMap<int2, int> edgeLookupTable, 
 			JobHandle dependencies)
 		{
 			var connectOppositeSpokesJob = new ConnectOppositeSpokesJob
@@ -130,10 +130,149 @@ namespace Kardashev
 
 		#region Subdivision
 
+		public struct CalculateSubdivisionMidpointsJob : IJobParallelFor
+		{
+			[Unity.Collections.ReadOnly] public NativeArray<int> Spokes;
+			
+			[WriteOnly] public NativeParallelHashMap<int2, int>.ParallelWriter MidpointLookup;
+			
+			[NativeDisableParallelForRestriction]
+			public NativeArray<float3> TilePositions;
+			
+			public void Execute(int spokeIndex)
+			{
+				var tileAIndex = Spokes[spokeIndex];
+				var tileBIndex = Spokes[PlanetHelpers.NextEdgeIndex(spokeIndex)];
+				
+				var midpointKey = new int2(math.min(tileAIndex, tileBIndex), math.max(tileAIndex, tileBIndex));
+				var midpointPosition = (
+					TilePositions[tileAIndex] +
+					TilePositions[tileBIndex]) / 2;
+            
+
+				midpointPosition = math.normalize(midpointPosition) * math.length(TilePositions[tileAIndex]);
+            
+				// Add the midpoint as a new corner in the subdivided map.
+				var midpointIndex = PlanetHelpers.AddTileCenter(midpointPosition, TilePositions);
+				
+				MidpointLookup.TryAdd(midpointKey, midpointIndex);
+			}
+		}
+		
+		public struct SubdividePlanetJob : IJobParallelFor
+		{
+			
+			[Unity.Collections.ReadOnly] public NativeParallelHashMap<int2, int> MidpointLookup;
+			
+			public NativeArray<int> Spokes;
+			public NativeArray<int> TileSpokes;
+			public NativeArray<int> TileSpokeOpposites;
+			public NativeArray<float3> TilePositions;
+			public NativeArray<float3> TileCorners;
+			
+			[Unity.Collections.ReadOnly] public NativeParallelHashMap<int2, int> EdgeLookupTable;
+
+			
+			public void Execute(int cornerIndex)
+			{
+				var baseEdge = cornerIndex * 3;
+                
+                // Get the three tile indices of the current corner.
+                var tileA = Spokes[baseEdge];
+                var tileB = Spokes[baseEdge + 1];
+                var tileC = Spokes[baseEdge + 2];
+                
+                // Compute (or reuse) midpoints for each edge.
+                var abMidpoint = GetMidpointCornerIndex(MidpointLookup, tileA, tileB);
+                var bcMidpoint = GetMidpointCornerIndex(MidpointLookup, tileB, tileC);
+                var caMidpoint = GetMidpointCornerIndex(MidpointLookup, tileC, tileA);
+                
+                // Create four new corners to replace the original corner.
+                PlanetHelpers.AddTileCorner(
+	                cornerIndex * 4,
+	                tileA, 
+	                abMidpoint,
+	                caMidpoint,
+	                EdgeLookupTable,
+	                Spokes,
+	                TileSpokes,
+	                TileSpokeOpposites,
+	                TilePositions,
+	                TileCorners);
+                PlanetHelpers.AddTileCorner(
+					cornerIndex * 4 + 1,
+					tileB, 
+					bcMidpoint, 
+					abMidpoint, 
+					EdgeLookupTable,
+					Spokes,
+					TileSpokes,
+					TileSpokeOpposites,
+					TilePositions,
+					TileCorners);
+                PlanetHelpers.AddTileCorner(
+					cornerIndex * 4 + 2,
+					tileC, 
+					caMidpoint, 
+					bcMidpoint, 
+					EdgeLookupTable,
+					Spokes,
+					TileSpokes,
+					TileSpokeOpposites,
+					TilePositions,
+					TileCorners);
+                PlanetHelpers.AddTileCorner(
+					cornerIndex * 4 + 3,
+					abMidpoint, 
+					bcMidpoint, 
+					caMidpoint, 
+					EdgeLookupTable,
+					Spokes,
+					TileSpokes,
+					TileSpokeOpposites,
+					TilePositions,
+					TileCorners);
+			}
+			
+			private int GetMidpointCornerIndex(NativeParallelHashMap<int2, int> midpointLookup, int tileAIndex, int tileBIndex)
+			{
+				var key = new int2(math.min(tileAIndex, tileBIndex), math.max(tileAIndex, tileBIndex));
+				if (midpointLookup.TryGetValue(key, out var midpointIndex))
+				{
+					return midpointIndex;
+				}
+
+				return -1;
+			}
+			
+			private void AddTileCorner(int cornerIndex, int tileAIndex, int  tileBIndex, int tileCIndex)
+			{
+				var baseEdgeIndex = cornerIndex * 3;
+				
+				// Add new tile spokes.
+				Spokes[baseEdgeIndex]     = tileAIndex;
+				Spokes[baseEdgeIndex + 1] = tileBIndex;
+				Spokes[baseEdgeIndex + 2] = tileCIndex;
+        
+				// Calculate and store corner position.
+				var cornerPosition = (TilePositions[tileAIndex] + TilePositions[tileBIndex] + TilePositions[tileCIndex]) / 3;
+				TileCorners[cornerIndex] = cornerPosition;
+
+				// Add spokes to tile if tile doesn't already have one.
+				if (TileSpokes[tileAIndex] == -1) TileSpokes[tileAIndex] = baseEdgeIndex;
+				if (TileSpokes[tileBIndex] == -1) TileSpokes[tileBIndex] = baseEdgeIndex + 1;
+				if (TileSpokes[tileCIndex] == -1) TileSpokes[tileCIndex] = baseEdgeIndex + 2;
+			
+				EdgeLookupTable.TryAdd(new int2(tileAIndex, tileBIndex), baseEdgeIndex);
+				EdgeLookupTable.TryAdd(new int2(tileBIndex, tileCIndex), baseEdgeIndex + 1);
+				EdgeLookupTable.TryAdd(new int2(tileCIndex, tileAIndex), baseEdgeIndex + 2);
+			}
+		}
+
 		private static void Subdivide(Planet planet)
         {
             var tempMap         = new Planet(planet.Seed, planet.Size, Allocator.Temp);
-            var edgeLookupTable = new NativeHashMap<(int, int), int>(0, Allocator.Temp);
+            var edgeLookupTable = new NativeParallelHashMap<int2, int>(0, Allocator.Temp);
             
             // Add all existing vertices to the temp map
             var tileCount = PlanetHelpers.FirstFreeIndex(planet.TilePositions);
@@ -143,7 +282,7 @@ namespace Kardashev
             }
 
             // Cache midpoints
-            var midpointLookup = new NativeHashMap<(int, int), int>(planet.Spokes.Length, Allocator.Temp);
+            var midpointLookup = new NativeHashMap<int2, int>(planet.Spokes.Length, Allocator.Temp);
 
             var cornerCount = PlanetHelpers.FirstFreeIndex(planet.TileCorners);
             for (var corner = 0; corner < cornerCount; corner++)
@@ -219,10 +358,10 @@ namespace Kardashev
             tempMap.Dispose();
         }
 
-        private static int GetMidpointCornerIndex(Planet temp, NativeHashMap<(int, int), int> midpointLookup, int tileAIndex, int tileBIndex)
+        private static int GetMidpointCornerIndex(Planet temp, NativeHashMap<int2, int> midpointLookup, int tileAIndex, int tileBIndex)
         {
             // Order the indices to ensure the key is consistent.
-            var key = (math.min(tileAIndex, tileBIndex), math.max(tileAIndex, tileBIndex));
+            var key = new int2(math.min(tileAIndex, tileBIndex), math.max(tileAIndex, tileBIndex));
             if (midpointLookup.TryGetValue(key, out var midpointIndex))
             {
                 return midpointIndex;

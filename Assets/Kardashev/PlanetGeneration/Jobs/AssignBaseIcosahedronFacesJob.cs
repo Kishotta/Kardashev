@@ -12,7 +12,7 @@ namespace Kardashev.PlanetGeneration.Jobs
 		[ReadOnly] public NativeArray<float3> TilePositions;
 
 		[WriteOnly] public NativeArray<float3> TileCorners;
-		[WriteOnly] public NativeParallelHashMap<(int, int), int>.ParallelWriter EdgeLookupTable;
+		[WriteOnly] public NativeParallelHashMap<int2, int>.ParallelWriter EdgeLookupTable;
 		
 		[NativeDisableParallelForRestriction]
 		[WriteOnly] public NativeArray<int> Spokes;
@@ -43,9 +43,9 @@ namespace Kardashev.PlanetGeneration.Jobs
 			if (TileSpokes[tileBIndex] == -1) TileSpokes[tileBIndex] = baseEdgeIndex + 1;
 			if (TileSpokes[tileCIndex] == -1) TileSpokes[tileCIndex] = baseEdgeIndex + 2;
 			
-			EdgeLookupTable.TryAdd((tileAIndex, tileBIndex), baseEdgeIndex);
-			EdgeLookupTable.TryAdd((tileBIndex, tileCIndex), baseEdgeIndex + 1);
-			EdgeLookupTable.TryAdd((tileCIndex, tileAIndex), baseEdgeIndex + 2);
+			EdgeLookupTable.TryAdd(new int2(tileAIndex, tileBIndex), baseEdgeIndex);
+			EdgeLookupTable.TryAdd(new int2(tileBIndex, tileCIndex), baseEdgeIndex + 1);
+			EdgeLookupTable.TryAdd(new int2(tileCIndex, tileAIndex), baseEdgeIndex + 2);
 		}
 	}
 }

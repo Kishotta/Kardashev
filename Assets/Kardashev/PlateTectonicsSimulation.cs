@@ -71,6 +71,7 @@ namespace Kardashev
 				MaxContinentalPlateDesiredElevation = maxContinentalPlateDesiredElevation,
 				MinPlateRotationRate                = minPlateRotationRate,
 				MaxPlateRotationRate                = maxPlateRotationRate,
+				PlateCount                          = plateCount,
 				Plates                              = plates,
 			};
 			var generateTectonicPlatesJobHandle = generateTectonicPlatesJob.Schedule(plates.Length, 64);
