@@ -28,6 +28,12 @@ namespace Kardashev
 		[Range(50f, 100f)] 
 		public float maxWindSpeed = 50f;
 		
+		[Header("Heat")]
+		[Range(0f, 1f)]
+		public float heatAdvectionFactor = 0.2f;
+		[Range(0f, 1f)]
+		public float heatForcingFactor   = 0.05f;
+		
 		public UnityEvent<Planet> onClimateSimulated;
 
 		private Planet _planet;
@@ -122,8 +128,8 @@ namespace Kardashev
 					BaseTemperatures   = cachedBasedTemperatures,
 					TileTemperatures   = planet.TileTemperatures,
 					NewTemperatures    = temperatureBuffer,
-					AdvectionFactor    = 0.2f,
-					ForcingFactor      = 0.05f,
+					AdvectionFactor    = heatAdvectionFactor,
+					ForcingFactor      = heatForcingFactor,
 				};
 				var heatAdvectionJobHandle = heatAdvectionJob.Schedule(planet.TilePositions.Length, 64, heatAdvectionDependency);
 
